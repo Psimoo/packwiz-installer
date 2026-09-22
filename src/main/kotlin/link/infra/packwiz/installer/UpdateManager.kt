@@ -22,6 +22,7 @@ import link.infra.packwiz.installer.ui.IUserInterface.CancellationResult
 import link.infra.packwiz.installer.ui.IUserInterface.ExceptionListResult
 import link.infra.packwiz.installer.ui.data.InstallProgress
 import link.infra.packwiz.installer.util.Log
+import link.infra.packwiz.installer.util.OutdatedFiles
 import okio.buffer
 import java.io.IOException
 import java.io.InputStreamReader
@@ -252,12 +253,12 @@ class UpdateManager internal constructor(private val opts: Options, val ui: IUse
 			val (uri, file) = it.next()
 			if (file.cachedLocation != null) {
 				if (indexFile.files.none { it.file.rebase(opts.packFolder) == uri }) { // File has been removed from the index
-					try {
-						Files.deleteIfExists(file.cachedLocation!!.nioPath)
-					} catch (e: IOException) {
-						Log.warn("Failed to delete file removed from index", e)
+					// Instead of deleting the old file (usually an older version of a mod), move it to the packwiz_Outdated folder
+					if (OutdatedFiles.moveToOutdated(opts.packFolder, file.cachedLocation!!.nioPath)) {
+						Log.info("Moved ${file.cachedLocation!!.filename} to ${OutdatedFiles.FOLDER_NAME} (removed from pack)")
+					} else {
+						Log.warn("Could not move ${file.cachedLocation!!.filename} to ${OutdatedFiles.FOLDER_NAME} (removed from pack)")
 					}
-					Log.info("Deleted ${file.cachedLocation!!.filename} (removed from pack)")
 					it.remove()
 				}
 			}
@@ -394,8 +395,8 @@ class UpdateManager internal constructor(private val opts: Options, val ui: IUse
 					DownloadTask.CompletionStatus.ALREADY_EXISTS_VALIDATED -> "${task.name} already exists (validated)"
 					DownloadTask.CompletionStatus.SKIPPED_DISABLED -> "Skipped ${task.name} (disabled)"
 					DownloadTask.CompletionStatus.SKIPPED_WRONG_SIDE -> "Skipped ${task.name} (wrong side)"
-					DownloadTask.CompletionStatus.DELETED_DISABLED -> "Deleted ${task.name} (disabled)"
-					DownloadTask.CompletionStatus.DELETED_WRONG_SIDE -> "Deleted ${task.name} (wrong side)"
+					DownloadTask.CompletionStatus.MOVED_DISABLED -> "Moved ${task.name} to ${OutdatedFiles.FOLDER_NAME} (disabled)"
+					DownloadTask.CompletionStatus.MOVED_WRONG_SIDE -> "Moved ${task.name} to ${OutdatedFiles.FOLDER_NAME} (wrong side)"
 				}
 			}
 			ui.submitProgress(InstallProgress(progress, i + 1, tasks.size))

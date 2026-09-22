@@ -10,7 +10,7 @@ import link.infra.packwiz.installer.target.Side
 import link.infra.packwiz.installer.target.path.PackwizFilePath
 import link.infra.packwiz.installer.ui.data.ExceptionDetails
 import link.infra.packwiz.installer.ui.data.IOptionDetails
-import link.infra.packwiz.installer.util.Log
+import link.infra.packwiz.installer.util.OutdatedFiles
 import okio.Buffer
 import okio.HashingSink
 import okio.blackholeSink
@@ -44,8 +44,8 @@ internal class DownloadTask private constructor(val metadata: IndexFile.File, va
 		ALREADY_EXISTS_VALIDATED,
 		SKIPPED_DISABLED,
 		SKIPPED_WRONG_SIDE,
-		DELETED_DISABLED,
-		DELETED_WRONG_SIDE;
+		MOVED_DISABLED,
+		MOVED_WRONG_SIDE;
 	}
 
 	val isOptional get() = metadata.linkedFile?.option?.optional ?: false
@@ -196,15 +196,13 @@ internal class DownloadTask private constructor(val metadata: IndexFile.File, va
 		cachedFile?.let {
 			if ((it.isOptional && !it.optionValue) || !correctSide()) {
 				if (it.cachedLocation != null) {
-					// Ensure wrong-side or optional false files are removed
-					try {
-						completionStatus = if (Files.deleteIfExists(it.cachedLocation!!.nioPath)) {
-							if (correctSide()) { CompletionStatus.DELETED_DISABLED } else { CompletionStatus.DELETED_WRONG_SIDE }
-						} else {
-							if (correctSide()) { CompletionStatus.SKIPPED_DISABLED } else { CompletionStatus.SKIPPED_WRONG_SIDE }
-						}
-					} catch (e: IOException) {
-						Log.warn("Failed to delete file", e)
+					// Ensure wrong-side or optional false files are moved out of the pack folder (into packwiz_Outdated)
+					val location = it.cachedLocation!!.nioPath
+					val existed = Files.exists(location)
+					val moved = existed && OutdatedFiles.moveToOutdated(packFolder, location)
+					completionStatus = when {
+						moved -> if (correctSide()) { CompletionStatus.MOVED_DISABLED } else { CompletionStatus.MOVED_WRONG_SIDE }
+						else -> if (correctSide()) { CompletionStatus.SKIPPED_DISABLED } else { CompletionStatus.SKIPPED_WRONG_SIDE }
 					}
 				} else {
 					completionStatus =
@@ -277,13 +275,8 @@ internal class DownloadTask private constructor(val metadata: IndexFile.File, va
 			}
 			cachedFile?.cachedLocation?.let {
 				if (destPath != it) {
-					// Delete old file if location changes
-					try {
-						Files.delete(cachedFile!!.cachedLocation!!.nioPath)
-					} catch (e: IOException) {
-						// Continue, as it was probably already deleted?
-						// TODO: log it
-					}
+					// Move the old file to packwiz_Outdated if the location changes
+					OutdatedFiles.moveToOutdated(packFolder, cachedFile!!.cachedLocation!!.nioPath)
 				}
 			}
 		} catch (e: Exception) {
